@@ -32,6 +32,11 @@ import { MedicalDisclaimerModal } from './components/MedicalDisclaimerModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { MobileShareAppModal } from './components/MobileShareAppModal';
 
+// Auth
+import { AuthUser } from './types/auth';
+import { AuthService } from './services/auth';
+import { AuthContainer } from './components/auth/AuthContainer';
+
 // Icons
 import {
   Activity,
@@ -51,9 +56,20 @@ import {
   X,
   Smartphone,
   QrCode,
+  LogOut,
+  User as UserIcon,
 } from 'lucide-react';
 
 export default function App() {
+  // Authentication State
+  const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
+    const session = AuthService.init();
+    if (session.user) {
+      StorageService.setUserId(session.user.id, session.user.name);
+    }
+    return session.user;
+  });
+
   // Application State
   const [userProfile, setUserProfile] = useState<UserProfile>(() => StorageService.getProfile());
   const [activePlan, setActivePlan] = useState<WorkoutPlan>(() => StorageService.getActivePlan());
@@ -74,6 +90,32 @@ export default function App() {
   const [isDisclaimerModalOpen, setIsDisclaimerModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isMobileShareOpen, setIsMobileShareOpen] = useState(false);
+
+  // Auth callbacks
+  const handleAuthenticated = (user: AuthUser, isNewRegistration = false) => {
+    setAuthUser(user);
+    StorageService.setUserId(user.id, user.name);
+    setUserProfile(StorageService.getProfile());
+    setActivePlan(StorageService.getActivePlan());
+    setHistory(StorageService.getHistory());
+    setMeasurements(StorageService.getMeasurements());
+    setAchievements(StorageService.getAchievements());
+    setNotifications(StorageService.getNotifications());
+
+    if (isNewRegistration) {
+      setIsOnboardingOpen(true);
+    } else {
+      setCurrentTab('home');
+    }
+  };
+
+  const handleLogout = async () => {
+    await AuthService.logout();
+    StorageService.setUserId(null);
+    setAuthUser(null);
+    setCurrentTab('home');
+    setMobileMenuOpen(false);
+  };
 
   // Sync to storage on profile change
   const handleUpdateProfile = (updated: UserProfile) => {
@@ -157,6 +199,11 @@ export default function App() {
   };
 
   const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
+
+  // Unauthenticated guard: show Welcome / Sign In / Sign Up
+  if (!authUser) {
+    return <AuthContainer onAuthenticated={handleAuthenticated} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-slate-950 pb-20 md:pb-0">
@@ -256,6 +303,29 @@ export default function App() {
               <ShieldAlert className="w-4 h-4" />
             </button>
 
+            {/* Desktop User Profile Badge & Logout */}
+            <div className="hidden md:flex items-center gap-1.5 pl-2 border-l border-slate-800">
+              <button
+                onClick={() => setCurrentTab('settings')}
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-800/70 hover:bg-slate-800 border border-slate-700/60 text-xs transition cursor-pointer"
+                title="Account Profile & Settings"
+              >
+                <div className="w-5 h-5 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-[10px]">
+                  {authUser.name.charAt(0).toUpperCase()}
+                </div>
+                <span className="font-semibold text-slate-200 max-w-[80px] truncate">
+                  {authUser.name}
+                </span>
+              </button>
+              <button
+                onClick={handleLogout}
+                className="p-2 rounded-xl bg-slate-800/60 hover:bg-rose-500/15 text-slate-400 hover:text-rose-400 border border-slate-700/60 transition cursor-pointer"
+                title="Log Out of AI Personal Trainer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
             {/* Mobile Hamburger toggle */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -269,6 +339,26 @@ export default function App() {
         {/* Mobile Dropdown Menu (Header accordion) */}
         {mobileMenuOpen && (
           <div className="lg:hidden px-4 py-3 bg-slate-900 border-b border-slate-800 space-y-1 text-xs">
+            {/* User Profile Info & Logout */}
+            <div className="flex items-center justify-between p-2.5 mb-2 bg-slate-950/80 rounded-xl border border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-xs">
+                  {authUser.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="font-bold text-white text-xs">{authUser.name}</div>
+                  <div className="text-[10px] text-slate-400">{authUser.email}</div>
+                </div>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg text-[11px] font-bold transition"
+              >
+                <LogOut className="w-3 h-3" />
+                <span>Log Out</span>
+              </button>
+            </div>
+
             <button
               onClick={() => {
                 setIsMobileShareOpen(true);
@@ -377,6 +467,7 @@ export default function App() {
             onUpdateProfile={handleUpdateProfile}
             onOpenDisclaimer={() => setIsDisclaimerModalOpen(true)}
             onRegenerateSchedule={handleRegenerateSchedule}
+            onLogout={handleLogout}
           />
         )}
       </main>

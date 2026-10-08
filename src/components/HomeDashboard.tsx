@@ -15,6 +15,7 @@ import {
   Target,
   Dumbbell,
   BookOpen,
+  Camera,
 } from 'lucide-react';
 
 interface HomeDashboardProps {
@@ -27,6 +28,7 @@ interface HomeDashboardProps {
   onIncrementWater: () => void;
   onOpenDisclaimer: () => void;
   onOpenMobileShare?: () => void;
+  onOpenScanner?: () => void;
 }
 
 export const HomeDashboard: React.FC<HomeDashboardProps> = ({
@@ -39,6 +41,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
   onIncrementWater,
   onOpenDisclaimer,
   onOpenMobileShare,
+  onOpenScanner,
 }) => {
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -66,6 +69,16 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {onOpenScanner && (
+            <button
+              onClick={onOpenScanner}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 rounded-xl font-bold text-xs transition shadow-sm cursor-pointer"
+              title="Scan gym equipment or QR codes"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>📷 Scan Equipment</span>
+            </button>
+          )}
           {onOpenMobileShare && (
             <button
               onClick={onOpenMobileShare}
@@ -178,8 +191,37 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
       </div>
 
       {/* QUICK ACTIONS & INTERACTIVE WIDGETS */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Widget 1: AI Coach Assistant */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Widget 1: AI Camera Scanner */}
+        {onOpenScanner ? (
+          <div
+            onClick={onOpenScanner}
+            className="p-5 bg-gradient-to-b from-cyan-950/30 to-slate-900 border border-cyan-500/30 hover:border-cyan-500/50 rounded-2xl cursor-pointer transition flex flex-col justify-between group shadow-sm"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 group-hover:scale-105 transition">
+                <Camera className="w-5 h-5 stroke-[2.5]" />
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full border border-cyan-500/20">
+                Camera Vision
+              </span>
+            </div>
+            <div>
+              <h3 className="font-bold text-white text-base group-hover:text-cyan-300 transition">
+                Scan Equipment & QR
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Scan dumbbells, barbells, or gym QR tags to auto-create instant customized routines.
+              </p>
+            </div>
+            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs text-cyan-400 font-semibold">
+              <span>Launch Camera Scanner</span>
+              <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition" />
+            </div>
+          </div>
+        ) : null}
+
+        {/* Widget 2: AI Coach Assistant */}
         <div
           onClick={() => onNavigateTab('coach')}
           className="p-5 bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl cursor-pointer transition flex flex-col justify-between group shadow-sm"
@@ -206,7 +248,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           </div>
         </div>
 
-        {/* Widget 2: Hydration Quick Tracker */}
+        {/* Widget 3: Hydration Quick Tracker */}
         <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col justify-between shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
@@ -225,14 +267,14 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between">
             <button
               onClick={onIncrementWater}
-              className="w-full py-2 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95"
+              className="w-full py-2 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
             >
               +1 Glass Drank
             </button>
           </div>
         </div>
 
-        {/* Widget 3: Exercise Library Shortcut */}
+        {/* Widget 4: Exercise Library Shortcut */}
         <div
           onClick={() => onNavigateTab('library')}
           className="p-5 bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl cursor-pointer transition flex flex-col justify-between group shadow-sm"

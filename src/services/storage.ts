@@ -190,19 +190,53 @@ export const INITIAL_HISTORY: CompletedWorkoutLog[] = [
 ];
 
 export class StorageService {
+  private static currentUserId: string = 'user-default-alex';
+  private static currentUserName: string = 'Alex Rivera';
+
+  static setUserId(userId: string | null, userName?: string): void {
+    this.currentUserId = userId || 'guest';
+    if (userName) {
+      this.currentUserName = userName;
+    }
+  }
+
+  static getUserId(): string {
+    return this.currentUserId;
+  }
+
+  private static getKey(keySuffix: string): string {
+    const uid = this.currentUserId || 'guest';
+    return `pulseai_${uid}_${keySuffix}`;
+  }
+
   static getProfile(): UserProfile {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.PROFILE);
+      const data = localStorage.getItem(this.getKey('profile'));
       if (data) return JSON.parse(data);
     } catch {
       // fallback
     }
-    return DEFAULT_PROFILE;
+
+    // If it's the demo account, return default Alex profile
+    if (this.currentUserId === 'user-default-alex' || this.currentUserId === 'guest') {
+      return DEFAULT_PROFILE;
+    }
+
+    // New user initial profile
+    const newProfile: UserProfile = {
+      ...DEFAULT_PROFILE,
+      id: this.currentUserId,
+      name: this.currentUserName || 'Fitness Athlete',
+      waterDrankTodayGlasses: 0,
+      lastActiveDate: new Date().toISOString().split('T')[0],
+    };
+    this.saveProfile(newProfile);
+    return newProfile;
   }
 
   static saveProfile(profile: UserProfile): void {
     try {
-      localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
+      localStorage.setItem(this.getKey('profile'), JSON.stringify(profile));
     } catch (e) {
       console.error('Failed to save profile', e);
     }
@@ -210,7 +244,7 @@ export class StorageService {
 
   static getActivePlan(): WorkoutPlan {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.ACTIVE_PLAN);
+      const data = localStorage.getItem(this.getKey('active_plan'));
       if (data) return JSON.parse(data);
     } catch {
       // fallback
@@ -220,7 +254,7 @@ export class StorageService {
 
   static saveActivePlan(plan: WorkoutPlan): void {
     try {
-      localStorage.setItem(STORAGE_KEYS.ACTIVE_PLAN, JSON.stringify(plan));
+      localStorage.setItem(this.getKey('active_plan'), JSON.stringify(plan));
     } catch (e) {
       console.error('Failed to save active plan', e);
     }
@@ -228,19 +262,24 @@ export class StorageService {
 
   static getHistory(): CompletedWorkoutLog[] {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.HISTORY);
+      const data = localStorage.getItem(this.getKey('history'));
       if (data) return JSON.parse(data);
     } catch {
       // fallback
     }
-    return INITIAL_HISTORY;
+
+    // If demo account, return initial history; new registered users start fresh
+    if (this.currentUserId === 'user-default-alex') {
+      return INITIAL_HISTORY;
+    }
+    return [];
   }
 
   static addWorkoutLog(log: CompletedWorkoutLog): void {
     const history = this.getHistory();
     const updated = [log, ...history];
     try {
-      localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(updated));
+      localStorage.setItem(this.getKey('history'), JSON.stringify(updated));
       // update achievements progress
       this.checkAndUpdateAchievements(log);
     } catch (e) {
@@ -250,19 +289,22 @@ export class StorageService {
 
   static getMeasurements(): BodyMeasurementLog[] {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.MEASUREMENTS);
+      const data = localStorage.getItem(this.getKey('measurements'));
       if (data) return JSON.parse(data);
     } catch {
       // fallback
     }
-    return INITIAL_MEASUREMENTS;
+    if (this.currentUserId === 'user-default-alex') {
+      return INITIAL_MEASUREMENTS;
+    }
+    return [];
   }
 
   static addMeasurement(log: BodyMeasurementLog): void {
     const list = this.getMeasurements();
     const updated = [...list, log];
     try {
-      localStorage.setItem(STORAGE_KEYS.MEASUREMENTS, JSON.stringify(updated));
+      localStorage.setItem(this.getKey('measurements'), JSON.stringify(updated));
     } catch (e) {
       console.error('Failed to save measurement', e);
     }
@@ -270,17 +312,25 @@ export class StorageService {
 
   static getAchievements(): Achievement[] {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.ACHIEVEMENTS);
+      const data = localStorage.getItem(this.getKey('achievements'));
       if (data) return JSON.parse(data);
     } catch {
       // fallback
     }
-    return DEFAULT_ACHIEVEMENTS;
+    if (this.currentUserId === 'user-default-alex') {
+      return DEFAULT_ACHIEVEMENTS;
+    }
+    // Fresh achievements with 0 progress for new user
+    return DEFAULT_ACHIEVEMENTS.map((a) => ({
+      ...a,
+      currentProgress: 0,
+      unlockedAt: undefined,
+    }));
   }
 
   static saveAchievements(achievements: Achievement[]): void {
     try {
-      localStorage.setItem(STORAGE_KEYS.ACHIEVEMENTS, JSON.stringify(achievements));
+      localStorage.setItem(this.getKey('achievements'), JSON.stringify(achievements));
     } catch (e) {
       console.error('Failed to save achievements', e);
     }
@@ -288,17 +338,29 @@ export class StorageService {
 
   static getNotifications(): NotificationItem[] {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+      const data = localStorage.getItem(this.getKey('notifications'));
       if (data) return JSON.parse(data);
     } catch {
       // fallback
     }
-    return INITIAL_NOTIFICATIONS;
+    if (this.currentUserId === 'user-default-alex') {
+      return INITIAL_NOTIFICATIONS;
+    }
+    return [
+      {
+        id: `notif-welcome-${Date.now()}`,
+        title: `Welcome, ${this.currentUserName || 'Athlete'}!`,
+        message: 'Your personal AI fitness coach is ready. Complete your profile and start your first workout!',
+        type: 'motivation',
+        timestamp: 'Just now',
+        read: false,
+      },
+    ];
   }
 
   static saveNotifications(items: NotificationItem[]): void {
     try {
-      localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(items));
+      localStorage.setItem(this.getKey('notifications'), JSON.stringify(items));
     } catch (e) {
       console.error('Failed to save notifications', e);
     }

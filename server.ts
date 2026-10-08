@@ -1,4 +1,7 @@
 import express, { Request, Response } from 'express';
+import http from 'http';
+import fs from 'fs';
+import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -27,6 +30,409 @@ if (apiKey) {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// AUTHENTICATION & SECURE USER DATABASE
+// ---------------------------------------------------------------------------
+const USERS_FILE = path.join(__dirname, 'users-db.json');
+const USER_DATA_DIR = path.join(__dirname, 'user-data-store');
+
+if (!fs.existsSync(USER_DATA_DIR)) {
+  fs.mkdirSync(USER_DATA_DIR, { recursive: true });
+}
+
+interface StoredUser {
+  id: string;
+  name: string;
+  email: string;
+  salt: string;
+  hash: string;
+  createdAt: string;
+  resetCode?: string;
+  resetExpires?: number;
+}
+
+interface SessionRecord {
+  token: string;
+  userId: string;
+  createdAt: string;
+  expiresAt: number;
+}
+
+function hashPassword(password: string): { salt: string; hash: string } {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return { salt, hash };
+}
+
+function verifyPassword(password: string, salt: string, storedHash: string): boolean {
+  try {
+    const derivedHash = crypto.scryptSync(password, salt, 64).toString('hex');
+    return crypto.timingSafeEqual(
+      Buffer.from(derivedHash, 'hex'),
+      Buffer.from(storedHash, 'hex')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function loadUsers(): Record<string, StoredUser> {
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      const content = fs.readFileSync(USERS_FILE, 'utf-8');
+      return JSON.parse(content);
+    }
+  } catch (err) {
+    console.error('Failed reading users db, initializing new:', err);
+  }
+  // Initialize with seeded demo user
+  const demoSeed = hashPassword('Fitness@2026!');
+  const initialUsers: Record<string, StoredUser> = {
+    'user-default-alex': {
+      id: 'user-default-alex',
+      name: 'Alex Rivera',
+      email: 'alex@pulsetrainer.ai',
+      salt: demoSeed.salt,
+      hash: demoSeed.hash,
+      createdAt: '2026-10-01T00:00:00.000Z',
+    },
+  };
+  saveUsers(initialUsers);
+  return initialUsers;
+}
+
+function saveUsers(users: Record<string, StoredUser>): void {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed saving users db:', err);
+  }
+}
+
+// In-memory active sessions map (with token lookup)
+const activeSessions: Map<string, SessionRecord> = new Map();
+
+function createSession(userId: string, rememberMe = true): SessionRecord {
+  const token = crypto.randomBytes(32).toString('hex');
+  // 30 days if rememberMe, 24 hours if not
+  const duration = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const session: SessionRecord = {
+    token,
+    userId,
+    createdAt: new Date().toISOString(),
+    expiresAt: Date.now() + duration,
+  };
+  activeSessions.set(token, session);
+  return session;
+}
+
+function getSessionUser(req: Request): StoredUser | null {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+  const token = authHeader.split(' ')[1];
+  const session = activeSessions.get(token);
+  if (!session) return null;
+  if (Date.now() > session.expiresAt) {
+    activeSessions.delete(token);
+    return null;
+  }
+  const users = loadUsers();
+  return users[session.userId] || null;
+}
+
+// User-scoped data storage helpers
+function getUserDataFilePath(userId: string): string {
+  // sanitize userId
+  const safeId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return path.join(USER_DATA_DIR, `${safeId}.json`);
+}
+
+function loadUserData(userId: string): any | null {
+  try {
+    const filePath = getUserDataFilePath(userId);
+    if (fs.existsSync(filePath)) {
+      return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    }
+  } catch (e) {
+    console.error('Error reading user data:', e);
+  }
+  return null;
+}
+
+function saveUserData(userId: string, data: any): void {
+  try {
+    const filePath = getUserDataFilePath(userId);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Error saving user data:', e);
+  }
+}
+
+// Ensure demo user is seeded
+loadUsers();
+
+// ---------------------------------------------------------------------------
+// AUTH ROUTES
+// ---------------------------------------------------------------------------
+
+// POST /api/auth/register
+app.post('/api/auth/register', (req: Request, res: Response) => {
+  try {
+    const { name, email, password } = req.body;
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Full Name is required' });
+    }
+    if (!email || typeof email !== 'string' || !email.trim()) {
+      return res.status(400).json({ error: 'Email address is required' });
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      return res.status(400).json({ error: 'Please enter a valid email address' });
+    }
+
+    if (!password || typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({
+        error: 'Password must be at least 8 characters long and contain letters and numbers',
+      });
+    }
+
+    const users = loadUsers();
+    // Check if email already used
+    const existing = Object.values(users).find(
+      (u) => u.email.toLowerCase() === trimmedEmail
+    );
+    if (existing) {
+      return res.status(409).json({
+        error: 'An account with this email address already exists. Please sign in instead.',
+      });
+    }
+
+    const { salt, hash } = hashPassword(password);
+    const userId = `usr_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const newUser: StoredUser = {
+      id: userId,
+      name: name.trim(),
+      email: trimmedEmail,
+      salt,
+      hash,
+      createdAt: new Date().toISOString(),
+    };
+
+    users[userId] = newUser;
+    saveUsers(users);
+
+    const session = createSession(userId, true);
+
+    return res.status(201).json({
+      user: {
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        createdAt: newUser.createdAt,
+      },
+      token: session.token,
+      expiresAt: new Date(session.expiresAt).toISOString(),
+    });
+  } catch (err: unknown) {
+    console.error('Register error:', err);
+    return res.status(500).json({ error: 'Registration failed. Please try again.' });
+  }
+});
+
+// POST /api/auth/login
+app.post('/api/auth/login', (req: Request, res: Response) => {
+  try {
+    const { email, password, rememberMe } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const trimmedEmail = String(email).trim().toLowerCase();
+    const users = loadUsers();
+
+    const user = Object.values(users).find(
+      (u) => u.email.toLowerCase() === trimmedEmail
+    );
+
+    if (!user) {
+      return res.status(401).json({ error: 'Incorrect email or password. Please try again.' });
+    }
+
+    const valid = verifyPassword(String(password), user.salt, user.hash);
+    if (!valid) {
+      return res.status(401).json({ error: 'Incorrect email or password. Please try again.' });
+    }
+
+    const session = createSession(user.id, Boolean(rememberMe ?? true));
+
+    return res.json({
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        createdAt: user.createdAt,
+      },
+      token: session.token,
+      expiresAt: new Date(session.expiresAt).toISOString(),
+    });
+  } catch (err: unknown) {
+    console.error('Login error:', err);
+    return res.status(500).json({ error: 'Login failed. Please try again.' });
+  }
+});
+
+// GET /api/auth/me
+app.get('/api/auth/me', (req: Request, res: Response) => {
+  const user = getSessionUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Not authenticated or session expired' });
+  }
+  return res.json({
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      createdAt: user.createdAt,
+    },
+  });
+});
+
+// POST /api/auth/logout
+app.post('/api/auth/logout', (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    activeSessions.delete(token);
+  }
+  return res.json({ success: true });
+});
+
+// POST /api/auth/forgot-password
+app.post('/api/auth/forgot-password', (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'Registered email address is required' });
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const users = loadUsers();
+    const user = Object.values(users).find(
+      (u) => u.email.toLowerCase() === trimmedEmail
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        error: 'No account found with this email address. Please check your spelling or create an account.',
+      });
+    }
+
+    // Generate secure 6-digit numeric verification code
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    user.resetCode = resetCode;
+    user.resetExpires = Date.now() + 15 * 60 * 1000; // 15 mins expiry
+    users[user.id] = user;
+    saveUsers(users);
+
+    return res.json({
+      success: true,
+      message: `Password reset instructions and verification code sent to ${user.email}`,
+      resetCode, // Returned for simulated inbox/preview so user can test seamlessly
+      email: user.email,
+      expiresInMinutes: 15,
+    });
+  } catch (err: unknown) {
+    console.error('Forgot password error:', err);
+    return res.status(500).json({ error: 'Failed to process password recovery' });
+  }
+});
+
+// POST /api/auth/reset-password
+app.post('/api/auth/reset-password', (req: Request, res: Response) => {
+  try {
+    const { email, resetCode, newPassword } = req.body;
+
+    if (!email || !resetCode || !newPassword) {
+      return res.status(400).json({
+        error: 'Email, verification code, and new password are required',
+      });
+    }
+
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return res.status(400).json({
+        error: 'New password must be at least 8 characters long',
+      });
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const users = loadUsers();
+    const user = Object.values(users).find(
+      (u) => u.email.toLowerCase() === trimmedEmail
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!user.resetCode || user.resetCode !== String(resetCode).trim()) {
+      return res.status(400).json({ error: 'Invalid verification code. Please check and try again.' });
+    }
+
+    if (!user.resetExpires || Date.now() > user.resetExpires) {
+      return res.status(400).json({
+        error: 'Verification code has expired. Please request a new password reset.',
+      });
+    }
+
+    // Hash new password securely
+    const { salt, hash } = hashPassword(newPassword);
+    user.salt = salt;
+    user.hash = hash;
+    delete user.resetCode;
+    delete user.resetExpires;
+
+    users[user.id] = user;
+    saveUsers(users);
+
+    return res.json({
+      success: true,
+      message: 'Password successfully updated! You can now sign in with your new password.',
+    });
+  } catch (err: unknown) {
+    console.error('Reset password error:', err);
+    return res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
+// GET /api/auth/user-data (isolated per user)
+app.get('/api/auth/user-data', (req: Request, res: Response) => {
+  const user = getSessionUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  const data = loadUserData(user.id);
+  return res.json({ data });
+});
+
+// PUT /api/auth/user-data (isolated per user)
+app.put('/api/auth/user-data', (req: Request, res: Response) => {
+  const user = getSessionUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  const { data } = req.body;
+  if (data) {
+    saveUserData(user.id, data);
+  }
+  return res.json({ success: true });
+});
 
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
@@ -434,13 +840,36 @@ Do not wrap in backticks or markdown, just return the JSON.`;
 
 // Setup Vite middleware in development or serve static in production
 async function startServer() {
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: {
+          server: httpServer,
+        },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
+
+    // Fallback handler in dev for SPA routing to prevent any 404
+    app.use('*', async (req: Request, res: Response, next) => {
+      const url = req.originalUrl;
+      if (url.startsWith('/api/')) {
+        return next();
+      }
+      try {
+        let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
   } else {
     app.use(express.static(path.join(__dirname, 'dist')));
     app.get('*', (_req: Request, res: Response) => {
@@ -448,7 +877,7 @@ async function startServer() {
     });
   }
 
-  app.listen(port, '0.0.0.0', () => {
+  httpServer.listen(port, '0.0.0.0', () => {
     console.log(`PulseAI Server running on http://0.0.0.0:${port}`);
   });
 }

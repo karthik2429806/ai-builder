@@ -1,0 +1,18 @@
+{
+  "user-default-alex": {
+    "id": "user-default-alex",
+    "name": "Alex Rivera",
+    "email": "alex@pulsetrainer.ai",
+    "salt": "9283bd5bdf962f0cda7318b15f2acb76",
+    "hash": "5ad8c3bd03c1a28439a7e6b134780cd2017219dfa91a905dc8cc009b4e33aa655aba244087bd0f38c052a75896ffe587ea39196d81464f78b24f6f24b2ddeab5",
+    "createdAt": "2026-10-01T00:00:00.000Z"
+  },
+  "usr_1791446261776_0644f58f": {
+    "id": "usr_1791446261776_0644f58f",
+    "name": "Jordan Smith",
+    "email": "jordan@example.com",
+    "salt": "77ab31a1d8f7188c5f20bab46a2fa2a2",
+    "hash": "2d19de65bf564837410860b9712130f0e26bf55e09436fcd6790a6291649d612501b968b84fd2d63fb0b385fee1ceeede9ad6714103d39d7f137bf72007bb6a6",
+    "createdAt": "2026-10-08T07:57:41.776Z"
+  }
+}
