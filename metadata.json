@@ -1,0 +1,6 @@
+{
+  "name": "PulseAI - AI Personal Trainer & Workout Coach",
+  "description": "Modern AI personal trainer providing customized daily and weekly workout plans, real-time exercise guidance, workout tracking, progress analytics, and 24/7 conversational coaching.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
